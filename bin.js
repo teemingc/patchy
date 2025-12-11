@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Parse command line arguments
- * @returns {{dryRun: boolean, repoDir: string, package: string, startVersion: string}} - Parsed command line options
+ * @returns {{dryRun: boolean, repoDir: string, package: string, startVersion: string, endVersion: string}} - Parsed command line options
  */
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -20,6 +20,7 @@ function parseArgs() {
     repoDir: "",
     package: "",
     startVersion: "",
+    endVersion: "",
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -34,7 +35,16 @@ function parseArgs() {
         if (!options.package) {
           options.package = args[i];
         } else if (!options.startVersion) {
-          options.startVersion = args[i];
+          // Check if this is a version range (e.g., "2.19.1-2.48.0")
+          const versionRangeMatch = args[i].match(
+            /^(\d+\.\d+\.\d+)-(\d+\.\d+\.\d+)$/,
+          );
+          if (versionRangeMatch) {
+            options.startVersion = versionRangeMatch[1];
+            options.endVersion = versionRangeMatch[2];
+          } else {
+            options.startVersion = args[i];
+          }
         }
         break;
     }
@@ -49,20 +59,22 @@ function parseArgs() {
  */
 function showUsage() {
   console.log(
-    "Usage: patchy [--dry-run] [--repo <path>] [@scope/]package-name [starting-version]",
+    "Usage: patchy [--dry-run] [--repo <path>] [@scope/]package-name [version-spec]",
   );
   console.log("");
   console.log("Options:");
-  console.log("  --dry-run       - Test patches without making changes (shows patch details)");
+  console.log(
+    "  --dry-run       - Test patches without making changes (shows patch details)",
+  );
   console.log(
     "  --repo <path>   - Path to git repository (default: current directory)",
   );
   console.log("");
   console.log("Arguments:");
   console.log("  package-name    - Package to patch (required)");
-  console.log(
-    "  starting-version - Minimum version to start patching from (optional)",
-  );
+  console.log("  version-spec    - Version or range to patch (optional)");
+  console.log("                    Examples: 2.19.1 (minimum version)");
+  console.log("                              2.19.1-2.48.0 (version range)");
   console.log("");
   console.log(
     "Patches should be placed in the 'patches/' directory relative to this script",
@@ -135,6 +147,11 @@ function applyCustomPatches(patchDir, dryRun) {
 
   const patchFiles = findFiles(patchDir);
 
+  const currentBranch = git("rev-parse --abbrev-ref HEAD", {
+    quiet: true,
+    stdio: "pipe",
+  }).trim();
+
   for (const { patchPath, targetPath } of patchFiles) {
     console.log(`  Processing patch: ${targetPath}`);
 
@@ -148,18 +165,20 @@ function applyCustomPatches(patchDir, dryRun) {
 
       if (!dryRun) {
         // For new files, read patch content, replace $CURRENT_BRANCH, then write
-        const currentBranch = git("rev-parse --abbrev-ref HEAD", {
-          quiet: true,
-          stdio: "pipe",
-        }).trim();
+
         const patchContent = fs.readFileSync(patchPath, "utf8");
-        const contentToWrite = patchContent.replace(/\$CURRENT_BRANCH/g, currentBranch);
-        
+        const contentToWrite = patchContent.replace(
+          /\$CURRENT_BRANCH/g,
+          currentBranch,
+        );
+
         fs.writeFileSync(targetPath, contentToWrite, "utf8");
-        console.log(styleText('green', `    ✓ File created: ${targetPath}`));
+        console.log(styleText("green", `    ✓ File created: ${targetPath}`));
       }
     } else {
-      console.log(styleText('green', `    ✓ Target file exists: ${targetPath}`));
+      console.log(
+        styleText("green", `    ✓ Target file exists: ${targetPath}`),
+      );
 
       // Parse and apply patches
       const patchContent = fs.readFileSync(patchPath, "utf8");
@@ -209,17 +228,20 @@ function applyCustomPatches(patchDir, dryRun) {
         totalBlocks++;
         foundBlocks++;
         console.log(
-          styleText('yellow', '    ✓ No find/replace blocks found - overwriting entire file'),
+          styleText(
+            "yellow",
+            "    ✓ No find/replace blocks found - overwriting entire file",
+          ),
         );
 
         if (!dryRun) {
           // Get current branch name and replace $CURRENT_BRANCH placeholder
-          const currentBranch = git("rev-parse --abbrev-ref HEAD", {
-            quiet: true,
-            stdio: "pipe",
-          }).trim();
-          const contentToWrite = patchContent.replace(/\$CURRENT_BRANCH/g, currentBranch);
-          
+
+          const contentToWrite = patchContent.replace(
+            /\$CURRENT_BRANCH/g,
+            currentBranch,
+          );
+
           fs.writeFileSync(targetPath, contentToWrite, "utf8");
           console.log("      File overwritten with patch content");
           changesApplied = 1;
@@ -230,11 +252,16 @@ function applyCustomPatches(patchDir, dryRun) {
         for (const block of blocks) {
           blockNum++;
           totalBlocks++;
-          const found = modifiedContent.includes(block.find);
+          block.find = block.find.replace(/\$CURRENT_BRANCH/g, currentBranch)
+          const found = modifiedContent.includes(
+            block.find,
+          );
 
           if (found) {
             foundBlocks++;
-            console.log(styleText('green', `    ✓ Block ${blockNum}: Found in file`));
+            console.log(
+              styleText("green", `    ✓ Block ${blockNum}: Found in file`),
+            );
 
             if (dryRun) {
               console.log("      --- FIND BLOCK ---");
@@ -256,9 +283,13 @@ function applyCustomPatches(patchDir, dryRun) {
             }
           } else {
             notFoundBlocks++;
-            console.log(styleText('red', `    ✗ Block ${blockNum}: NOT FOUND in file`));
+            console.log(
+              styleText("red", `    ✗ Block ${blockNum}: NOT FOUND in file`),
+            );
             const findPreview = block.find.substring(0, 100);
-            console.log(styleText('gray', `      Looking for: ${findPreview}...`));
+            console.log(
+              styleText("gray", `      Looking for: ${findPreview}...`),
+            );
           }
         }
 
@@ -269,18 +300,29 @@ function applyCustomPatches(patchDir, dryRun) {
             quiet: true,
             stdio: "pipe",
           }).trim();
-          const finalContent = modifiedContent.replace(/\$CURRENT_BRANCH/g, currentBranch);
-          
+          const finalContent = modifiedContent.replace(
+            /\$CURRENT_BRANCH/g,
+            currentBranch,
+          );
+
           fs.writeFileSync(targetPath, finalContent, "utf8");
           console.log(
-            styleText('green', `    ✓ Applied ${changesApplied} replacement(s) to ${targetPath}`),
+            styleText(
+              "green",
+              `    ✓ Applied ${changesApplied} replacement(s) to ${targetPath}`,
+            ),
           );
         }
       }
     }
 
     if (dryRun) {
-      console.log(styleText('cyan', `    Summary: ${foundBlocks}/${totalBlocks} blocks found`));
+      console.log(
+        styleText(
+          "cyan",
+          `    Summary: ${foundBlocks}/${totalBlocks} blocks found`,
+        ),
+      );
     }
   }
 }
@@ -306,9 +348,10 @@ function compareVersions(v1, v2) {
  * Get list of versions to patch for a given package
  * @param {string} packageName - Name of the package to get versions for
  * @param {string} startVersion - Minimum version to start from (optional)
+ * @param {string} endVersion - Maximum version to end at (optional)
  * @returns {string[]} - Array of version strings to patch
  */
-function getVersionsToPatch(packageName, startVersion) {
+function getVersionsToPatch(packageName, startVersion, endVersion) {
   // Get all tags for the package
   const tags = git(`tag -l "${packageName}@*"`, { quiet: true, stdio: "pipe" })
     .trim()
@@ -347,6 +390,13 @@ function getVersionsToPatch(packageName, startVersion) {
     );
   }
 
+  // Filter by end version (exclusive)
+  if (endVersion) {
+    filteredVersions = filteredVersions.filter(
+      (v) => compareVersions(v, endVersion) < 0,
+    );
+  }
+
   return filteredVersions;
 }
 
@@ -358,7 +408,7 @@ async function main() {
   const options = parseArgs();
 
   if (!options.package) {
-    console.error(styleText('red', 'Error: Package name is required'));
+    console.error(styleText("red", "Error: Package name is required"));
     console.log("");
     showUsage();
     process.exit(1);
@@ -371,7 +421,10 @@ async function main() {
   if (options.repoDir) {
     if (!fs.existsSync(options.repoDir)) {
       console.error(
-        styleText('red', `Error: Repository directory not found: ${options.repoDir}`),
+        styleText(
+          "red",
+          `Error: Repository directory not found: ${options.repoDir}`,
+        ),
       );
       process.exit(1);
     }
@@ -383,21 +436,29 @@ async function main() {
   try {
     git("rev-parse --git-dir", { quiet: true, stdio: "pipe" });
   } catch (error) {
-    console.error(styleText('red', 'Error: Not in a git repository'));
+    console.error(styleText("red", "Error: Not in a git repository"));
     process.exit(1);
   }
 
   // Get versions to patch
-  const versions = getVersionsToPatch(options.package, options.startVersion);
+  const versions = getVersionsToPatch(
+    options.package,
+    options.startVersion,
+    options.endVersion,
+  );
 
-  console.log(styleText('cyan', 'Found versions to patch:'));
+  console.log(styleText("cyan", "Found versions to patch:"));
   console.log(versions.join("\n"));
   console.log("");
 
   if (options.dryRun) {
-    console.log(styleText('yellow', '=========================================='));
-    console.log(styleText('yellow', 'DRY RUN MODE - No changes will be made'));
-    console.log(styleText('yellow', '=========================================='));
+    console.log(
+      styleText("yellow", "=========================================="),
+    );
+    console.log(styleText("yellow", "DRY RUN MODE - No changes will be made"));
+    console.log(
+      styleText("yellow", "=========================================="),
+    );
     console.log("");
   }
 
@@ -410,26 +471,52 @@ async function main() {
     const newTag = `${options.package}@${newVersion}`;
     const branchName = `${options.package}@${major}.${minor}`;
 
-    console.log(styleText('cyan', '=========================================='));
-    console.log(styleText('cyan', `Processing: ${tag} -> ${newTag}`));
-    console.log(styleText('cyan', '=========================================='));
+    console.log(
+      styleText("cyan", "=========================================="),
+    );
+    console.log(styleText("cyan", `Processing: ${tag} -> ${newTag}`));
+    console.log(
+      styleText("cyan", "=========================================="),
+    );
 
     // Checkout the original tag (detached HEAD)
     console.log(`Checking out ${tag}...`);
     git(`-c advice.detachedHead=false checkout "${tag}"`, { quiet: true });
 
-    // Create or switch to branch
-    const branchExists = git(`show-ref --verify refs/heads/${branchName}`, {
+    // Check if remote branch exists
+    const remoteBranchExists = git(`ls-remote --heads origin "${branchName}"`, {
       quiet: true,
       allowError: true,
       stdio: "pipe",
-    });
+    }).trim();
 
-    if (branchExists) {
-      console.log(`Switching to existing branch ${branchName}...`);
-      git(`checkout "${branchName}"`, { quiet: true });
+    if (remoteBranchExists) {
+      console.log(
+        `Remote branch ${branchName} exists, checking out and pulling...`,
+      );
+
+      // Check if local branch exists
+      const localBranchExists = git(
+        `show-ref --verify refs/heads/${branchName}`,
+        {
+          quiet: true,
+          allowError: true,
+          stdio: "pipe",
+        },
+      );
+
+      if (localBranchExists) {
+        git(`checkout "${branchName}"`, { quiet: true });
+      } else {
+        git(`checkout -b "${branchName}" --track "origin/${branchName}"`, {
+          quiet: true,
+        });
+      }
+
+      console.log(`Pulling latest changes for ${branchName}...`);
+      git(`pull origin "${branchName}" --no-rebase`);
     } else {
-      console.log(`Creating branch ${branchName}...`);
+      console.log(`Creating new branch ${branchName}...`);
       git(`checkout -b "${branchName}"`, { quiet: true });
     }
 
@@ -437,7 +524,7 @@ async function main() {
     applyCustomPatches(patchDir, options.dryRun);
 
     if (options.dryRun) {
-      console.log(styleText('yellow', 'DRY RUN: Skipping commit/push steps'));
+      console.log(styleText("yellow", "DRY RUN: Skipping commit/push steps"));
       try {
         git("checkout main", { quiet: true, allowError: true });
       } catch {
@@ -452,28 +539,24 @@ async function main() {
       continue;
     }
 
-    // Check if there are changes to commit
-    // git diff --quiet returns empty string (falsy) when there ARE changes
-    const noDiff = git("diff --quiet", {
+    // Check if there are any changes before staging
+    const hasChanges = git("status --porcelain", {
       quiet: true,
-      allowError: true,
       stdio: "pipe",
-    });
+    }).trim();
 
-    if (noDiff) {
-      console.log(styleText('gray', `No changes to commit for ${tag}, skipping...`));
-      try {
-        git("checkout main", { quiet: true, allowError: true });
-      } catch {
-        git("checkout master", { quiet: true, allowError: true });
-      }
-      git(`branch -D "${branchName}"`, { quiet: true, allowError: true });
+    if (!hasChanges) {
+      console.log(
+        styleText("gray", `No changes to commit for ${tag}, skipping...`),
+      );
       continue;
     }
 
+    // Stage all changes
+    git("add -A");
+
     // Commit changes
     console.log("Committing changes...");
-    git("add -A");
     git(
       `commit -m "Security patch for ${tag}\n\nApplied updates to version ${version}"`,
     );
@@ -497,13 +580,13 @@ async function main() {
   }
 
   console.log("");
-  console.log(styleText('green', '=========================================='));
-  console.log(styleText('green', 'All versions patched successfully!'));
-  console.log(styleText('green', '=========================================='));
+  console.log(styleText("green", "=========================================="));
+  console.log(styleText("green", "All versions patched successfully!"));
+  console.log(styleText("green", "=========================================="));
 }
 
 // Run main function
 main().catch((error) => {
-  console.error(styleText('red', 'Error:'), error.message);
+  console.error(styleText("red", "Error:"), error.message);
   process.exit(1);
 });

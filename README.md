@@ -39,6 +39,7 @@ For example:
 
 ```bash
 node bin.js --repo ~/path/to/repo @sveltejs/kit 1.5.0
+node bin.js --repo ~/path/to/repo @sveltejs/kit 1.5.0-2.5.0
 ```
 
 It will then:
