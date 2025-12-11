@@ -1,2 +1,3 @@
 /patches/*
 !/patches/.gitkeep
+/node_modules

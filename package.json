@@ -1,0 +1,30 @@
+{
+  "name": "patchy",
+  "version": "0.0.1",
+  "description": "Apply security patches to specific package versions in a git repository",
+  "type": "module",
+  "main": "bin.js",
+  "bin": {
+    ".": "./bin.js"
+  },
+  "scripts": {
+    "check": "tsc",
+    "patchy": "node bin.js"
+  },
+  "keywords": [
+    "patch",
+    "security",
+    "git",
+    "versioning"
+  ],
+  "author": "teemingc",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3"
+  }
+}
